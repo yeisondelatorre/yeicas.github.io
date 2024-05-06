@@ -1,0 +1,37 @@
+project:
+  type: website
+
+website:
+  title: "Visualización Científica"
+  page-footer:
+    background: light
+    left: "Copyright 2021, Norah Jones" 
+    center: "Call: +57 3186808215"
+    right: 
+      - icon: twitter 
+        href: https://twitter.com/
+      - icon: instagram
+        href: https://www.instagram.com/
+      - icon: whatsapp
+        href: https://wa.link/f4qdb8
+  navbar:
+    tools:
+      - icon: github
+        href: https://github.com/yeisondelatorre
+    background: primary
+    search: true
+    right:
+      - text: "Home"
+        file: index.qmd
+      
+    logo: images.png
+
+format:
+  html:
+    theme:
+      light: flatly
+      dark: darkly
+    toc: true
+
+editor: visual
+css: styles.css

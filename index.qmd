@@ -1,0 +1,365 @@
+---
+title: "Modelo predictivo de las viviendas del área metropolitana de Barranquilla"
+author: "Yeison De La Torre"
+output:
+  quarto::quarto_article:
+    toc: true
+    toc_float:
+      collapsed: true
+    number_sections: true
+---
+
+# Introducción
+
+Este trabajo se enfoca en desarrollar un modelo predictivo de precios de vivienda en Barranquilla, Colombia, utilizando análisis espacial y variables relacionadas con características de las viviendas y factores urbanos. Siguiendo la hipótesis hedónica, se busca comprender cómo los atributos de las viviendas y las amenidades urbanas afectan los precios. Se emplea la metodología de regresión Lasso, junto con Ridge y Elastic Net, para seleccionar y estimar variables relevantes, destacando que Elastic Net muestra ventajas al excluir predictores irrelevantes y mejorar la predicción fuera de muestra.
+
+Este estudio aborda la formación de precios de viviendas en Barranquilla mediante análisis espacial y variables que reflejan tanto características de las viviendas como atributos urbanos. Se emplea la metodología Lasso Regression, junto con Ridge y Elastic Net, para seleccionar variables y estimar coeficientes de regresión, con especial atención en la eficacia de Elastic Net para mejorar la precisión del modelo al excluir predictores irrelevantes.
+
+# Tratamiento de los datos
+
+los datos utilizados en el presente estudio fueron tomados del sitio web https://www.properati.com.co/data lo cual cuenta con una colección de 162063 observaciones de predios en venta en el área metropolitana de Barranquilla
+
+```{r message=FALSE, warning=FALSE}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(plotly)
+library(kableExtra)
+setwd("C:/Users/YEISON DE LA TORRE/Desktop/visualización de datos/proyecto_final/M_predict_h.github.io")
+dta0 <- read.csv("df/proper.csv")
+
+kable(head(dta0, 3))
+
+
+
+
+```
+
+El procesamiento y tratamiento de datos juegan un papel fundamental en la generación de información significativa, esto con la finalidad de garantizar precisión en los resultados. Es por ello que los pasos siguientes son cruciales a la hora presentar resultados.
+
+```{r message=FALSE, warning=FALSE}
+#quitar duplicados
+dta0<- dta0 %>% distinct(price,lat,lon,start_date,.keep_all = TRUE)
+```
+
+Nuestro conjunto de datos está conformado por todos los inmuebles en venta ubicados en el área metropolitana de Barranquilla, esto lo podemos apreciar en la variable `title`. Cómo el objetivo principal radica en construir modelos predictivos del precio de ventas de las casas y apartamentos, se depura el `df` de la siguiente manera
+
+```{r message=FALSE, warning=FALSE}
+dta0<- dta0 %>% mutate(casa=ifelse(grepl("[Cc][Aa][Ss][Aa]",title)==TRUE,1,0))
+
+
+dta0<- dta0 %>% mutate(apartamento=ifelse(grepl("[Aa][Pp][Aa][Rr][Tt][Aa][Mm][Ee][Nn][Tt][Oo]",title)==TRUE,1,0))
+
+##quitas las oficinas y solo dejar casas y apartamentos
+dta <- dta0 %>% 
+          mutate(casayapar= casa + apartamento) %>% 
+           filter(casayapar>=1 )
+
+
+```
+
+Lo anterior reduce nuestro conjunto de datos a $135141$ observaciones
+
+## Creación de nuevas variables
+
+dentro de las variables de `df`, se encuentra una llamada `description` lo cúal contiene toda la descripción del inmueble otorgada por el oferente, tomaremos dicho vector para construir nuevas variables dicotómicas intrínsecas de la casa o apartamento. Para esto es necesario estandarizar los comentarios a caracteres en minúsculas y sin tildes con fines prácticos
+
+```{r message=FALSE, warning=FALSE}
+dta<-dta %>% mutate(description=tolower(description))
+
+#eliminar tildes
+dta <- dta %>% mutate(description=iconv(description, from = "UTF-8", to = "ASCII//TRANSLIT"))
+```
+
+**Variable piscina**
+
+```{r message=FALSE, warning=FALSE}
+## crear variable dummy piscina
+dta <- dta %>% mutate(piscina=ifelse(grepl("piscina",description)==TRUE,1,0)) 
+```
+
+**variable estacionamiento**
+```{r message=FALSE, warning=FALSE}
+dta<- dta %>% mutate(parqueadero=ifelse(grepl("[Pp][Aa][Rr][Qq][Uu][Ee][AA][Dd][Ee][Rr][Oo]",description)==TRUE,1,0))
+dta<- dta %>% mutate(garaje=ifelse(grepl("[Gg][Aa][Rr][Aa][Jj][Ee]",description)==TRUE,1,0))
+dta <- dta %>% mutate(estacionamiento = parqueadero + garaje)
+```
+
+**variable baldosa**
+```{r message=FALSE, warning=FALSE}
+dta<- dta %>% mutate(baldosa=ifelse(grepl("[BbVv][Aa][Ll][Dd][Oo][ZzSs][Aa]",description)==TRUE,1,0))
+dta<- dta %>% mutate(ceramica=ifelse(grepl("[Cc][Ee][Rr][Aa][Mm][Ii][Cc][Aa]",description)==TRUE,1,0))
+dta<- dta %>% mutate(porcelanato=ifelse(grepl("[Pp][Oo][Rr][Cc][Ee][Ll][Aa][Nn][Aa][Tt][Oo]",description)==TRUE,1,0))
+dta <- dta %>% mutate(piso_bald_cera = baldosa + ceramica + porcelanato)
+dta$piso_bald_cera <- ifelse(dta$piso_bald_cera >= "1", "1", "0")
+```
+
+**variable seguridad privada**
+```{r message=FALSE, warning=FALSE}
+
+dta<- dta %>% mutate(seguridad=ifelse(grepl("[Ss][Ee][Gg][Uu][Rr][Ii][Dd][Aa][Dd]",description)==TRUE,1,0))
+dta<- dta %>% mutate(vigilancia=ifelse(grepl("[Vv][Ii][Gg][Ii][Ll][Aa][Nn][Cc][Ii][Aa]",description)==TRUE,1,0))
+dta <- dta %>% mutate(segur_vig = seguridad + vigilancia)
+dta$segur_vig <- ifelse(dta$segur_vig >= "1", "1", "0")
+```
+
+**variable balcon**
+```{r message=FALSE, warning=FALSE}
+
+dta<- dta %>% mutate(balcon=ifelse(grepl("[Bb][Aa][Ll][Cc][Oo][Nn]",description)==TRUE,1,0))
+```
+
+## nuevo conjunto de datos
+```{r message=FALSE, warning=FALSE}
+dta <- select(dta, lat, lon, rooms, bedrooms, bathrooms, price, lnprice, casayapar, piscina, estacionamiento, piso_bald_cera, segur_vig, balcon)
+
+kable(head(dta, 10))
+
+```
+
+
+```{r message=FALSE, warning=FALSE}
+t1 <- summary(dta)
+kable(t1)
+```
+
+En el ejercicio estadístico anterior se logra apreciar a simple vista la presencia de datos faltantes `NA`. No obstante, es necesario la detección y tratamiento del mismo
+
+```{r message=FALSE, warning=FALSE}
+# Contar valores faltantes por columna
+na_count <- colSums(is.na(dta))
+# Mostrar el número de valores faltantes por columna
+kable(print(na_count))
+```
+las variables rooms, bedrooms y bathrooms cuentan con datos faltantes. Existen diversas alternativas y métodos para trabajar con dichos datos, cómo lo es la técnica de imputación o k-vecinos. Sin embargo, en el ejercicio solo procedemos a eliminar lo NA
+
+```{r message=FALSE, warning=FALSE}
+dta <- na.omit(dta)
+```
+
+donde el conjunto de datos se reduce a $26982$, más adelante observaremos cómo cambian los modelos ajustados cuando se procede a tratar los NA por la técnica de imputación.
+
+## variables espaciales
+
+Si bien el trabajo se centra bajo la metodología de los precios hedónicos, no hacemos caso omiso a las variables espaciales cómo lo son las distancias de ciertas amenidades o zonas. En este orden de ideas, el df cuenta con dos variables cruciales lo cúales son lat y lon. Estas representan las coordenadas planas de cada predio en venta ubicado en el área metropolitana de Barranquilla, lo siguiente busca en convertir nuestro df de archivo csv a shape file y así obtener una nueva variable llamada geometry, donde se estandariza en $CRS = 4326$. El término "CRS 4326" hace referencia a un sistema de referencia de coordenadas utilizado comúnmente en cartografía y sistemas de información geográfica (SIG). CRS significa "Coordinate Reference System" (Sistema de Referencia de Coordenadas, en español).
+
+El CRS 4326 es también conocido como WGS 84 (World Geodetic System 1984). Este sistema utiliza un modelo esférico de la Tierra para representar las coordenadas geográficas, donde los puntos se identifican mediante dos valores: la latitud y la longitud.
+
+-La latitud se refiere a la posición de un punto en el eje norte-sur de la Tierra, medida en grados desde el ecuador hasta los polos.
+
+-La longitud se refiere a la posición de un punto en el eje este-oeste de la Tierra, medida en grados desde el meridiano de Greenwich hasta el meridiano opuesto.
+
+```{r message=FALSE, warning=FALSE}
+library(sf)
+dta <- st_as_sf(dta, coords = c("lon", "lat"), crs= 4326)
+```
+
+### variable zona industrial
+
+Para el cálculo de las distancias de los predios en venta a la zona industrial del área metropolitana de Barranquilla, principalmente se obtiene los polígonos y centroides de dicha zona con la ayuda del paquete `osmdata` y `leaflet` y por medio de técnicas cómo econometría espacial observaremos su significancia
+
+```{r message=FALSE, warning=FALSE}
+library(osmdata)
+library(leaflet)
+
+zona_ind <- opq(bbox = getbb("Barranquilla Colombia")) %>%
+  add_osm_feature(key = "landuse" , value = "industrial")
+
+zona_ind_sf <- osmdata_sf(zona_ind)
+
+
+zona_ind_geometria <- zona_ind_sf$osm_polygons %>% 
+  select(osm_id, name) %>% 
+  st_set_crs(4326) 
+
+leaflet(zona_ind_geometria) %>% 
+  addTiles() %>% 
+  addPolygons(col="black")
+
+```
+**Centroides zona insdustrial**
+
+```{r message=FALSE, warning=FALSE}
+#todos los centroides
+centroids_all2<-st_centroid(zona_ind_geometria)
+
+leaflet(zona_ind_geometria) %>% 
+  addTiles() %>% 
+  addCircleMarkers(data=centroids_all2,col="black") %>% 
+  addPolygons(col="yellow")  
+```
+**Cálculo de la distancia mínima entre los predios y zonas industriales**
+
+```{r message=FALSE, warning=FALSE}
+#Distancias de las propiedades a las zonas industriales
+dist_matrix2 <- st_distance(x = dta, y = centroids_all2)
+
+
+# Encontramos la distancia mínima a las zonas industriales
+dist_min_zi <- apply(dist_matrix2, 1, min)
+dta$distancia_zona_ind <- dist_min_zi
+summary(dta$distancia_zona_ind)
+
+```
+El estadístico de resumen anterior se infiere que el inmueble mas cercano a una zona industrial es de 8 metros y el más lejano se encuentra a 20 kilómetros, donde en niveles representativos la distancia entre ellas es de 18 metros
+
+```{r message=FALSE, warning=FALSE}
+reg1<-lm(price~distancia_zona_ind, dta)
+stargazer::stargazer(reg1,type="text")
+```
+la variable espacial distancia de la zona industrial es significativa, puesto que su p valor es menor que el alpha del 5%
+
+### variable Centros Comerciales
+
+```{r message=FALSE, warning=FALSE}
+cc <- opq(bbox = getbb("Barranquilla Colombia")) %>%
+  add_osm_feature(key = "building" , value = "commercial")
+
+cc_sf <- osmdata_sf(cc)
+
+
+cc_geometria <- cc_sf$osm_polygons %>% 
+  select(osm_id, name)
+
+
+
+leaflet(cc_geometria) %>% 
+  addTiles() %>% 
+  addPolygons(col="green")
+
+```
+
+**Centroides Centros Comerciales y/o Plazas Comerciales**
+```{r message=FALSE, warning=FALSE}
+#todos los centroides
+centroids_all_cc<-st_centroid(cc_geometria)
+
+leaflet(cc_geometria) %>% 
+  addTiles() %>% 
+  addCircleMarkers(data=centroids_all_cc,col="red") %>% 
+  addPolygons(col="green")
+```
+
+
+```{r message=FALSE, warning=FALSE}
+#Distancias de las propiedades a los cc
+dist_matrix_cc <- st_distance(x = dta, y = centroids_all_cc)
+
+
+# Encontramos la distancia mínima a un cc
+dist_min_cc <- apply(dist_matrix_cc, 1, min)
+dta$distancia_cc <- dist_min_cc
+
+summary(dta$distancia_cc)
+
+```
+De lo anterior se infiere que los predios estan cerca de Centros Comerciales y/o Plazas Comerciales y que el más lejano se encuentra alrededor de los 22 kilómetros. No obstante la distancia representativa se centra a un kilómetro de distancia
+
+
+```{r message=FALSE, warning=FALSE}
+reg1<-lm(price~distancia_cc, dta)
+stargazer::stargazer(reg1,type="text")
+```
+la variable espacial distancia de los centros comerciales es significativa, puesto que su p valor es menor que el alpha del 5%. cabe resaltar, que el signo esperado de dicha variable es el esperado, puesto que a medida que la distancia sea más lejana de un centro comercial, los precios disminuyen
+
+
+# Entrenamiento de los modelos
+
+## Modelo lasso
+
+```{r message=FALSE, warning=FALSE, warning=FALSE, }
+library("caret")
+require("glmnet")
+
+###modelo sin (coc_integral  y sin baldosa, price ~ estacionamiento  + piscina + bedrooms  + porcelanato + segur_vig + coc_integral + distancia_cc + distancia_zona_ind)
+lambda <- 10^seq(-1, 10, length = 1000)
+
+lasso <- train(price ~ estacionamiento  + piscina + bedrooms  + segur_vig  + distancia_cc + distancia_zona_ind, data = dta, method = "glmnet",
+  trControl = trainControl("cv", number = 5),
+  tuneGrid = expand.grid(alpha = 1, lambda= lambda), preProcess = c("center", "scale")
+)
+lasso
+coef_lasso<-predict(lasso$finalModel, type = "coef", mode = "fraction", s = as.numeric(lasso$bestTune))
+
+```
+
+## modelo lm
+```{r message=FALSE, warning=FALSE}
+
+
+ols <- train(price ~ estacionamiento  + piscina + bedrooms  + segur_vig  + distancia_cc + distancia_zona_ind,   # el punto te dice que utilice toda las variables
+             data = dta,                        
+             trControl = trainControl(method = "cv", number = 5),     # Method: crossvalidation, 10 folds
+             method = "lm")                      # specifying regression model
+ols
+coef_ols<-ols$finalModel$coefficients
+print(coef_ols)
+```
+
+### modelo ridge
+```{r message=FALSE, warning=FALSE}
+
+
+ridge <- train(
+  price ~ estacionamiento  + piscina + bedrooms  + segur_vig  + distancia_cc + distancia_zona_ind, data = dta, method = "glmnet",
+  trControl = trainControl("cv", number = 5),
+  tuneGrid = expand.grid(alpha = 0,lambda=lambda), preProcess = c("center", "scale")
+)
+
+ridge
+coef_ridge<-predict(ridge$finalModel, type = "coef", mode = "fraction", s = as.numeric(ridge$bestTune))
+
+```
+
+
+### comparación de los modelos
+```{r}
+
+
+models <- list(ridge = ridge, lm = ols, lasso = lasso)
+resamples(models) %>% summary(metric = "RMSE")
+```
+
+
+
+```{r}
+library(dplyr)
+library(ggplot2)
+
+# Extraer coeficientes de Lasso
+cl <- data.frame(name = rownames(coef_lasso), coef = coef_lasso[, 1], model = "Lasso")
+
+# Extraer coeficientes de Ridge
+cr <- data.frame(name = rownames(coef_ridge), coef = coef_ridge[, 1], model = "Ridge")
+
+# Extraer coeficientes de OLS
+mols <- data.frame(name = names(ols$finalModel$coefficients), coef = ols$finalModel$coefficients, model = "OLS")
+
+# Combinar coeficientes de los tres modelos en un solo dataframe
+db_coefs <- rbind(cl, cr, mols)
+
+# Filtrar los coeficientes que no sean el intercepto
+db_coefs <- db_coefs %>% filter(!grepl("Intercept", name))
+
+# Graficar los coeficientes
+ggplot(db_coefs, aes(x = name, y = coef, group = model, col = model)) +
+  geom_point(alpha = 1, size = 10) +
+  geom_hline(yintercept = 0, lty = "dashed", col = "black") +
+  xlab("Predictor") +
+  theme_bw() +
+  theme(legend.title = element_blank(),
+        legend.position = "bottom",
+        legend.direction = "horizontal",
+        legend.box = "horizontal",
+        legend.box.just = "top",
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        legend.background = element_rect(fill = 'transparent'),
+        axis.text.x = element_text(angle = 45, vjust = 0.6, hjust = 0.5),
+        text = element_text(size = 22),
+        rect = element_rect(colour = "transparent", fill = "white"))
+
+
+```
+
+
